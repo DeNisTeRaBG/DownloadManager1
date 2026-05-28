@@ -1,6 +1,7 @@
 import os, sys, requests, cloudscraper, re
 from PySide6.QtWidgets import (QLineEdit, QPushButton, QApplication,
                                QVBoxLayout, QHBoxLayout, QDialog, QFileDialog)
+from PySide6.QtCore import Qt
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -15,6 +16,7 @@ class Form(QDialog):
         super(Form, self).__init__(parent)
         self.setWindowTitle("python")
 
+
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("Paste Download Link")
 
@@ -24,17 +26,23 @@ class Form(QDialog):
         self.path_edit.setReadOnly(True)
         
         self.browse_button = QPushButton("Browse...")
+        self.download_button = QPushButton("Download")
 
+        
         path_layout = QHBoxLayout()
         path_layout.addWidget(self.path_edit)
         path_layout.addWidget(self.browse_button)
+        path_layout.addWidget(self.download_button, alignment=Qt.AlignRight)
 
-        self.download_button = QPushButton("Download")
 
         main_layout = QVBoxLayout()
+
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+
         main_layout.addWidget(self.url_edit)
         main_layout.addLayout(path_layout) # Add the horizontal row we made above
-        main_layout.addWidget(self.download_button)
+        main_layout.addStretch()
 
         self.setLayout(main_layout)
 
@@ -80,5 +88,6 @@ class Form(QDialog):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     form = Form()
+    form.resize(700, 150)
     form.show()
     sys.exit(app.exec())
