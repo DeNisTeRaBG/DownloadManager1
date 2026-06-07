@@ -5,10 +5,9 @@ headers = {
 }
 
 
-
 def download_file(url, folder_path):
         if not url:
-            print("Error: Please provide both a link")
+            print("Error: Please provide a link")
             return
 
         match = re.search(r'/([^/]+\.(jpg|png|txt))$', url, re.IGNORECASE)
