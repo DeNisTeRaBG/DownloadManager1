@@ -8,6 +8,7 @@ site_x = ''
 
 
 class DownloadWorker(QThread):
+    progress_signal = Signal(str)
     finished_signal = Signal(bool, str) 
 
     def __init__(self, url, folder_path):
@@ -16,23 +17,13 @@ class DownloadWorker(QThread):
         self.folder_path = folder_path
 
     def run(self):
-        """This runs in the background perfectly isolated from the UI"""
-        match = re.search(r'/([^/]+\.(jpg|jpeg|png|gif|txt))$', self.url, re.IGNORECASE)
-        filename = match.group(1) if match else "downloaded_file.png"
-        final_save_path = os.path.join(self.folder_path, filename)
-
-        scraper = cloudscraper.create_scraper()
+        success, message = process_download(
+            self.link, 
+            self.folder_path, 
+            progress_callback=self.progress_signal.emit
+        )
         
-        try:
-            r = scraper.get(self.url, headers=headers)
-            if r.status_code == 200:
-                with open(final_save_path, "wb") as file:
-                    file.write(r.content)
-                self.finished_signal.emit(True, f"Success! Saved to:\n{final_save_path}")
-            else:
-                self.finished_signal.emit(False, f"Failed. Status code: {r.status_code}")
-        except Exception as e:
-            self.finished_signal.emit(False, f"Network error: {e}")
+        self.finished_signal.emit(success, message)
 
 
 class DownloadDialog(QDialog):
@@ -81,19 +72,21 @@ class DownloadDialog(QDialog):
             print("Error: Please provide a link and a save path.")
             return
 
-        # 1. Lock the UI so they don't click it twice
         self.download_button.setEnabled(False)
-        self.download_button.setText("Downloading...")
-        print("Download started in background...")
+        self.download_button.setText("Working...")
 
-        # 2. Create the worker and hand it the data
-        self.worker = DownloadWorker(url, folder_path)
+        # Create the worker
+        self.worker = DownloadWorker(link, folder_path)
         
-        # 3. Connect the worker's signal to our wrap-up function
+        # Connect both signals
+        self.worker.progress_signal.connect(self.on_progress_update)
         self.worker.finished_signal.connect(self.on_download_finished)
         
-        # 4. Start the background thread!
+        # Start the background thread
         self.worker.start()
+
+    def on_progress_update(self, current_status):
+        print(current_status)
 
     def on_download_finished(self, success, message):
         """This function triggers automatically when the worker emits its signal"""
