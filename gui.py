@@ -95,13 +95,12 @@ class DownloadDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Main Hub")
+        self.setWindowTitle("SnowPrism Download Manager")
         self.resize(700, 500)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # --- NEW: Added a layout for our top buttons ---
         button_layout = QHBoxLayout()
 
         self.open_downloader_btn = QPushButton("Add New Download")

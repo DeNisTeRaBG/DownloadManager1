@@ -1,3 +1,8 @@
+__pycache__
 .vscode
 venv
-__pycache__
+build
+aria2c.exe
+download_history.json
+dist
+main.spec

@@ -1,5 +1,6 @@
 import re
 import os
+import sys
 import json
 import cloudscraper
 import subprocess
@@ -139,3 +140,19 @@ class HistoryManager:
                 json.dump(history_data, file, indent=4)
         except Exception as e:
             print(f"Failed to save history: {e}")
+
+
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # If we are not compiled, use the normal script folder
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    
+    return os.path.join(base_path, relative_path)
+
+
+ARIA2_EXECUTABLE = get_resource_path("aria2c.exe")
