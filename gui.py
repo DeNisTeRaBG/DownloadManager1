@@ -1,5 +1,6 @@
 import re
 import os
+import winreg
 import platform
 import subprocess
 from urllib.parse import unquote
