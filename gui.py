@@ -126,7 +126,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table)
 
         self.open_downloader_btn.clicked.connect(self.open_downloader)
-        self.remove_item_btn.clicked.connect(self.remove_selected_item) # --- NEW ---
+        self.remove_item_btn.clicked.connect(self.remove_selected_item)
         
         self.downloader_dialog = None
         self.active_workers = []
@@ -136,7 +136,6 @@ class MainWindow(QMainWindow):
         self.history_manager = HistoryManager()
         self.load_history_to_table()
 
-    # --- NEW: Remove Item Logic ---
     def remove_selected_item(self):
         """Deletes the currently selected row and updates the JSON file."""
         current_row = self.table.currentRow()
@@ -153,6 +152,9 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.Yes:
             self.table.removeRow(current_row)
             self.save_history_from_table()
+
+
+
     def load_history_to_table(self):
         history_data = self.history_manager.load()
         
@@ -175,6 +177,9 @@ class MainWindow(QMainWindow):
             self.last_save_path = item["folder_path"]
 
     def save_history_from_table(self):
+        
+
+
         history_data = []
         for row in range(self.table.rowCount()):
             name_item = self.table.item(row, 0)
@@ -205,6 +210,21 @@ class MainWindow(QMainWindow):
         self.downloader_dialog.activateWindow()
 
     def start_download(self, url, folder_path):
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item:
+                hidden_data = item.data(Qt.UserRole)
+                if hidden_data and hidden_data.get("url") == url:
+                    reply = QMessageBox.question(
+                        self, "Duplicate Download", 
+                        "This link is already in your download history.\n\nDo you want to add it again?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    
+                    if reply == QMessageBox.No:
+                        return
+
+
         self.last_save_path = folder_path 
         
         current_row = self.table.rowCount()
@@ -233,15 +253,19 @@ class MainWindow(QMainWindow):
 
     def on_progress_update(self, row, current_status):
         match = re.search(r'\((\d+)%\)', current_status)
+
         if match:
-            percentage = f"{match.group(1)}%"
-            self.table.item(row, 1).setText(percentage)
+            percent_val = match.group(1)
+
+            if percent_val != "100":
+                    self.table.item(row, 1).setText(f"{percent_val}%")
 
     def on_download_finished(self, row, success, message):
         if success:
             self.table.item(row, 1).setText("100%")
         else:
             self.table.item(row, 1).setText("Error")
+            QMessageBox.critical(self, "Download Failed", f"Reason:\n{message}")
         
         self.save_history_from_table()
 
@@ -264,4 +288,7 @@ class MainWindow(QMainWindow):
         self.save_history_from_table()
         event.accept()
 
-
+    def open_downloader_with_link(self, url):
+            """Opens the downloader dialog and pre-fills the URL."""
+            self.open_downloader()
+            self.downloader_dialog.url_edit.setText(url)

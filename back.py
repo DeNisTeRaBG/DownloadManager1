@@ -4,6 +4,10 @@ import json
 import cloudscraper
 import subprocess
 import glob
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ARIA2_EXECUTABLE = os.path.join(BASE_DIR, "venv", "Scripts", "aria2c.exe")
+
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
@@ -59,7 +63,7 @@ def _download_magnet(magnet_link, folder_path, progress_callback):
         # --dir: sets the output directory
         # --seed-time=0: ensures it stops immediately after the download finishes
         cmd = [
-            "aria2c",
+            ARIA2_EXECUTABLE,
             "--dir", folder_path,
             "--seed-time=0",
             magnet_link
@@ -71,7 +75,8 @@ def _download_magnet(magnet_link, folder_path, progress_callback):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
 
         # Capture the output line by line and send it to the GUI progress callback
@@ -99,7 +104,17 @@ def _download_magnet(magnet_link, folder_path, progress_callback):
         return False, "Error: 'aria2c' is not installed or not added to your system PATH."
     except Exception as e:
         return False, f"An unexpected error occurred: {e}"
+    
 
+def remove_srt_files(directory):
+    search_pattern = os.path.join(directory, '**', '*.srt')
+    
+    for file_path in glob.glob(search_pattern, recursive=True):
+        try:
+            os.remove(file_path)
+            print(f"Deleted subtitle: {file_path}")
+        except Exception as e:
+            print(f"Failed to delete {file_path}: {e}")
     
 class HistoryManager:
     def __init__(self, filepath="download_history.json"):
@@ -124,13 +139,3 @@ class HistoryManager:
                 json.dump(history_data, file, indent=4)
         except Exception as e:
             print(f"Failed to save history: {e}")
-
-def remove_srt_files(directory):
-    search_pattern = os.path.join(directory, '**', '*.srt')
-    
-    for file_path in glob.glob(search_pattern, recursive=True):
-        try:
-            os.remove(file_path)
-            print(f"Deleted subtitle: {file_path}")
-        except Exception as e:
-            print(f"Failed to delete {file_path}: {e}")
