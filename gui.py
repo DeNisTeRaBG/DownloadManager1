@@ -1,35 +1,50 @@
-from PySide6.QtWidgets import (QLineEdit, QPushButton, QApplication,
+import re
+import os
+import platform
+import subprocess
+from urllib.parse import unquote
+from PySide6.QtWidgets import (QLineEdit, QPushButton,
                                QVBoxLayout, QHBoxLayout, QDialog, QFileDialog, 
-                               QMainWindow, QWidget)
+                               QMainWindow, QWidget, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox)
 from PySide6.QtCore import Qt, QThread, Signal
-from back import *
+from back import HistoryManager, download_file
 
-site_x = ''
+def get_display_name(url):
+    if url.startswith("magnet:"):
+        match = re.search(r'dn=([^&]+)', url)
+        if match:
+            return unquote(match.group(1).replace('+', ' '))
+        return "Unknown Torrent"
+    else:
+        return url.split('/')[-1] or "Unknown File"
 
 
 class DownloadWorker(QThread):
-    progress_signal = Signal(str)
-    finished_signal = Signal(bool, str) 
+    progress_signal = Signal(int, str) 
+    finished_signal = Signal(int, bool, str) 
 
-    def __init__(self, url, folder_path):
+    def __init__(self, row, url, folder_path):
         super().__init__()
+        self.row = row
         self.url = url
         self.folder_path = folder_path
 
     def run(self):
-        success, message = process_download(
-            self.link, 
+        success, message = download_file(
+            self.url, 
             self.folder_path, 
-            progress_callback=self.progress_signal.emit
+            progress_callback=lambda msg: self.progress_signal.emit(self.row, msg)
         )
-        
-        self.finished_signal.emit(success, message)
+        self.finished_signal.emit(self.row, success, message)
 
 
 class DownloadDialog(QDialog):
+    download_requested = Signal(str, str) 
+
     def __init__(self, parent=None):
         super(DownloadDialog, self).__init__(parent)
-        self.setWindowTitle("Downloader")
+        self.setWindowTitle("New Download")
+        self.setFixedSize(500, 150)
 
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("Paste Download Link")
@@ -39,7 +54,7 @@ class DownloadDialog(QDialog):
         self.path_edit.setReadOnly(True)
         
         self.browse_button = QPushButton("Browse...")
-        self.download_button = QPushButton("Download")
+        self.download_button = QPushButton("Start Download")
 
         path_layout = QHBoxLayout()
         path_layout.addWidget(self.path_edit)
@@ -57,72 +72,196 @@ class DownloadDialog(QDialog):
         self.setLayout(main_layout)
 
         self.browse_button.clicked.connect(self.choose_path)
-        self.download_button.clicked.connect(self.start_download)
+        self.download_button.clicked.connect(self.send_download_request)
 
     def choose_path(self):
         folder_path = QFileDialog.getExistingDirectory(self, "Select Download Folder")
         if folder_path:
             self.path_edit.setText(folder_path)
 
-    def start_download(self):
+    def send_download_request(self):
         url = self.url_edit.text()
         folder_path = self.path_edit.text()
 
         if not url or not folder_path:
-            print("Error: Please provide a link and a save path.")
             return
 
-        self.download_button.setEnabled(False)
-        self.download_button.setText("Working...")
+        self.download_requested.emit(url, folder_path)
+        self.url_edit.clear() 
 
-        # Create the worker
-        self.worker = DownloadWorker(link, folder_path)
-        
-        # Connect both signals
-        self.worker.progress_signal.connect(self.on_progress_update)
-        self.worker.finished_signal.connect(self.on_download_finished)
-        
-        # Start the background thread
-        self.worker.start()
+        self.close()
 
-    def on_progress_update(self, current_status):
-        print(current_status)
-
-    def on_download_finished(self, success, message):
-        """This function triggers automatically when the worker emits its signal"""
-        
-        # 1. Unlock the UI again
-        self.download_button.setEnabled(True)
-        self.download_button.setText("Download")
-
-        # 2. Print the result
-        if success:
-            print(message)
-        else:
-            print(f"ERROR: {message}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Main Hub")
-        self.resize(500, 300)
+        self.resize(700, 500)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        self.open_downloader_btn = QPushButton("Open Image Downloader")
-        self.open_downloader_btn.setFixedSize(200, 50)
+        # --- NEW: Added a layout for our top buttons ---
+        button_layout = QHBoxLayout()
 
+        self.open_downloader_btn = QPushButton("Add New Download")
+        self.open_downloader_btn.setFixedSize(200, 40)
+        
+        self.remove_item_btn = QPushButton("Remove Selected")
+        self.remove_item_btn.setFixedSize(200, 40)
+        
+        button_layout.addWidget(self.open_downloader_btn)
+        button_layout.addWidget(self.remove_item_btn)
+        button_layout.setAlignment(Qt.AlignCenter)
+
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels(["File Name", "Progress"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows) # Select whole rows at once
+        self.table.cellDoubleClicked.connect(self.open_download_directory)
 
         layout = QVBoxLayout(central_widget)
-        layout.addWidget(self.open_downloader_btn, alignment=Qt.AlignCenter)
-
+        layout.addLayout(button_layout)
+        layout.addWidget(self.table)
 
         self.open_downloader_btn.clicked.connect(self.open_downloader)
+        self.remove_item_btn.clicked.connect(self.remove_selected_item) # --- NEW ---
+        
+        self.downloader_dialog = None
+        self.active_workers = []
+
+        self.last_save_path = ""
+
+        self.history_manager = HistoryManager()
+        self.load_history_to_table()
+
+    # --- NEW: Remove Item Logic ---
+    def remove_selected_item(self):
+        """Deletes the currently selected row and updates the JSON file."""
+        current_row = self.table.currentRow()
+        
+        if current_row < 0:
+            return
+            
+        confirm = QMessageBox.question(
+            self, "Confirm Removal", 
+            "Remove this item from your download history? (The downloaded files will NOT be deleted)",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if confirm == QMessageBox.Yes:
+            self.table.removeRow(current_row)
+            self.save_history_from_table()
+    def load_history_to_table(self):
+        history_data = self.history_manager.load()
+        
+        for item in history_data:
+            current_row = self.table.rowCount()
+            self.table.insertRow(current_row)
+
+            display_name = get_display_name(item["url"])
+            name_item = QTableWidgetItem(display_name)
+            
+            hidden_data = {"url": item["url"], "folder_path": item["folder_path"]}
+            name_item.setData(Qt.UserRole, hidden_data) 
+            
+            progress_item = QTableWidgetItem(item["progress"])
+            progress_item.setTextAlignment(Qt.AlignCenter)
+
+            self.table.setItem(current_row, 0, name_item)
+            self.table.setItem(current_row, 1, progress_item)
+
+            self.last_save_path = item["folder_path"]
+
+    def save_history_from_table(self):
+        history_data = []
+        for row in range(self.table.rowCount()):
+            name_item = self.table.item(row, 0)
+            progress_item = self.table.item(row, 1)
+
+            if name_item and progress_item:
+                # Retrieve our hidden dictionary
+                hidden_data = name_item.data(Qt.UserRole)
+                
+                history_data.append({
+                    "url": hidden_data["url"], 
+                    "folder_path": hidden_data["folder_path"],
+                    "progress": progress_item.text()
+                })
+
+        self.history_manager.save(history_data)
 
     def open_downloader(self):
-        downloader_dialog = DownloadDialog(self)
+        if self.downloader_dialog is None:
+            self.downloader_dialog = DownloadDialog(self)
+            self.downloader_dialog.download_requested.connect(self.start_download)
+            
+        if self.last_save_path:
+            self.downloader_dialog.path_edit.setText(self.last_save_path)
+
+        self.downloader_dialog.show()
+        self.downloader_dialog.raise_()
+        self.downloader_dialog.activateWindow()
+
+    def start_download(self, url, folder_path):
+        self.last_save_path = folder_path 
         
-        downloader_dialog.setFixedSize(700, 150)
+        current_row = self.table.rowCount()
+        self.table.insertRow(current_row)
+
+        display_name = get_display_name(url)
+        name_item = QTableWidgetItem(display_name)
         
-        downloader_dialog.exec()
+        hidden_data = {"url": url, "folder_path": folder_path}
+        name_item.setData(Qt.UserRole, hidden_data) 
+        
+        progress_item = QTableWidgetItem("Starting...")
+        progress_item.setTextAlignment(Qt.AlignCenter)
+
+        self.table.setItem(current_row, 0, name_item)
+        self.table.setItem(current_row, 1, progress_item)
+
+        worker = DownloadWorker(current_row, url, folder_path)
+        worker.progress_signal.connect(self.on_progress_update)
+        worker.finished_signal.connect(self.on_download_finished)
+        
+        self.active_workers.append(worker) 
+        worker.start()
+        
+        self.save_history_from_table()
+
+    def on_progress_update(self, row, current_status):
+        match = re.search(r'\((\d+)%\)', current_status)
+        if match:
+            percentage = f"{match.group(1)}%"
+            self.table.item(row, 1).setText(percentage)
+
+    def on_download_finished(self, row, success, message):
+        if success:
+            self.table.item(row, 1).setText("100%")
+        else:
+            self.table.item(row, 1).setText("Error")
+        
+        self.save_history_from_table()
+
+    def open_download_directory(self, row, column):
+        hidden_data = self.table.item(row, 0).data(Qt.UserRole)
+        folder_path = hidden_data["folder_path"]
+        
+        if not folder_path or not os.path.exists(folder_path):
+            print("Directory does not exist yet.")
+            return
+            
+        if platform.system() == "Windows":
+            os.startfile(folder_path)
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", folder_path])
+        else:
+            subprocess.Popen(["xdg-open", folder_path])
+
+    def closeEvent(self, event):
+        self.save_history_from_table()
+        event.accept()
+
+
